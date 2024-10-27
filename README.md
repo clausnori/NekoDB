@@ -1,0 +1,2 @@
+# NekoDB
+Simple LocalStorage DB
