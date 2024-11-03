@@ -1,0 +1,3 @@
+xxhash
+lz4
+numpy

@@ -1,360 +1,339 @@
-# Документация NekoDB
+# Документация NoSQL базы данных
 
 ## Содержание
 1. [Введение](#введение)
-2. [Установка и инициализация](#установка-и-инициализация)
-3. [Основные концепции](#основные-концепции)
-4. [Типы данных](#типы-данных)
-5. [API Reference](#api-reference)
-6. [Примеры использования](#примеры-использования)
-7. [Работа с индексами](#работа-с-индексами)
-8. [Многопоточность](#многопоточность)
-9. [Импорт и экспорт данных](#импорт-и-экспорт-данных)
+2. [Основные концепции](#основные-концепции)
+3. [Структура данных](#структура-данных)
+4. [API Reference](#api-reference)
+5. [Примеры использования](#примеры-использования)
 
 ## Введение
-NekoDB - это легковесная база данных, реализованная на Python. Она поддерживает:
-- Создание таблиц с различными типами данных
-- CRUD операции (Create, Read, Update, Delete)
-- Индексирование полей для быстрого поиска
-- Внешние ключи и ссылочную целостность
-- Многопоточный доступ к данным
-- Кэширование записей
-- Импорт и экспорт данных в JSON
 
-## Установка и инициализация
-
-```python
-from nekodb import NekoDB
-
-# Создание экземпляра базы данных
-db = NekoDB(data_dir="path/to/data", cache_size=10000)
-```
-
-Параметры инициализации:
-- `data_dir`: путь к директории для хранения файлов базы данных
-- `cache_size`: размер кэша для каждой таблицы (по умолчанию 10000 записей)
+NekoDB представляет собой встраиваемую NoSQL систему управления данными с поддержкой:
+- Шардирования данных
+- Индексирования
+- Параллельной обработки
+- Сжатия данных
+- Ссылочной целостности
+- Полнотекстового поиска
 
 ## Основные концепции
 
-### Таблицы
-Таблица - основная структура для хранения данных. Каждая таблица имеет:
-- Имя
-- Набор колонок с определенными типами данных
-- Метаданные (индексы, количество записей и т.д.)
-- Файл для хранения данных
+### Шардирование
+NekoDB автоматически разделяет данные на шарды (фрагменты) для оптимальной производительности. Каждый шард содержит подмножество записей, определяемое ключом шардирования.
 
-### Колонки
-Каждая колонка имеет следующие характеристики:
-- Имя
-- Список поддерживаемых типов данных
-- Флаг nullable (может ли содержать NULL)
-- Флаг unique (должны ли значения быть уникальными)
-- Флаг indexed (нужно ли индексировать значения)
-- Опциональную ссылку на другую таблицу (внешний ключ)
+### Индексирование
+Поддерживаются следующие типы индексов:
+- Стандартные индексы для быстрого поиска по значению
+- Строковые индексы для поиска по префиксу
+- Фильтры Блума для быстрой проверки существования значений
 
-### Условия поиска
-Для поиска записей используются объекты `QueryCondition` с операторами:
-- `=`: равенство
-- `>`: больше
-- `<`: меньше
-- `>=`: больше или равно
-- `<=`: меньше или равно
-- `!=`: не равно
-- `in`: значение в списке
-- `not in`: значение не в списке
-- `contains`: содержит подстроку/элемент
-- `startswith`: начинается с
-- `endswith`: заканчивается на
+### Сжатие
+Поддерживаются следующие алгоритмы сжатия:
+- LZ4 (по умолчанию)
+- ZLIB
+- Без сжатия
 
-## Типы данных
+## Структура данных
 
-NekoDB поддерживает следующие типы данных:
-
-1. `int`: целые числа
-   ```python
-   'id': {'types': ['int'], 'unique': True}
-   ```
-
-2. `float`: числа с плавающей точкой
-   ```python
-   'price': {'types': ['float']}
-   ```
-
-3. `str`: строки
-   ```python
-   'name': {'types': ['str'], 'nullable': False}
-   ```
-
-4. `bool`: логические значения
-   ```python
-   'active': {'types': ['bool']}
-   ```
-
-5. `list`: списки
-   ```python
-   'tags': {'types': ['list']}
-   ```
-
-6. `dict`: словари
-   ```python
-   'metadata': {'types': ['dict']}
-   ```
-
-7. `time`: дата и время
-   ```python
-   'created_at': {'types': ['time']}
-   ```
-
-Поле может поддерживать несколько типов данных:
+### Column (Колонка)
 ```python
-'value': {'types': ['int', 'float']}
+@dataclass
+class Column:
+    name: str                    # Имя колонки
+    types: List[str]            # Допустимые типы данных
+    reference: Optional[Reference] # Внешний ключ
+    indexed: bool               # Индексировать ли колонку
+    unique: bool                # Требование уникальности
+    nullable: bool              # Разрешены ли NULL значения
+    compression: str            # Алгоритм сжатия
+    shard_key: bool            # Использовать как ключ шардирования
+    autoincrement: bool        # Автоинкремент
+```
+
+### TableMetadata (Метаданные таблицы)
+```python
+@dataclass
+class TableMetadata:
+    name: str                   # Имя таблицы
+    columns: Dict[str, Column]  # Колонки
+    record_count: int          # Количество записей
+    indexes: Dict              # Индексы
+    file_path: str            # Путь к файлу
+    shards: List[TableShard]   # Шарды
+    bloom_filters: Dict        # Фильтры Блума
+    string_index: Dict        # Строковые индексы
 ```
 
 ## API Reference
 
-### Работа с таблицами
+### Класс DB
 
-#### create_table
+#### Конструктор
+```python
+def __init__(self, data_dir: str, cache_size: int = 100000,
+             max_shard_size: int = 1_000_000,
+             worker_threads: int = 8)
+```
+
+Параметры:
+- `data_dir`: Директория для хранения данных
+- `cache_size`: Размер кэша для каждой таблицы
+- `max_shard_size`: Максимальный размер шарда
+- `worker_threads`: Количество потоков для параллельной обработки
+
+#### Методы
+
+##### create_table
 ```python
 def create_table(self, table_name: str, columns: Dict[str, Dict[str, Any]]) -> None
 ```
 Создает новую таблицу.
 
 Параметры:
-- `table_name`: имя таблицы
-- `columns`: словарь с описанием колонок
+- `table_name`: Имя таблицы
+- `columns`: Описание колонок
 
 Пример:
 ```python
-db.create_table('users', {
-    'id': {'types': ['int'], 'unique': True},
-    'name': {'types': ['str'], 'nullable': False},
-    'email': {'types': ['str'], 'unique': True},
-    'age': {'types': ['int'], 'nullable': True}
+db.create_table("users", {
+    "id": {
+        "types": ["int"],
+        "indexed": True,
+        "unique": True,
+        "nullable": False,
+        "autoincrement": True
+    },
+    "name": {
+        "types": ["str"],
+        "indexed": True
+    },
+    "age": {
+        "types": ["int"],
+        "nullable": True
+    }
 })
 ```
 
-#### drop_table
-```python
-def drop_table(self, table_name: str) -> None
-```
-Удаляет таблицу.
-
-Параметры:
-- `table_name`: имя таблицы
-
-### Работа с данными
-
-#### insert
+##### insert
 ```python
 def insert(self, table_name: str, record: Dict[str, Any]) -> None
 ```
-Добавляет новую запись в таблицу.
+Вставляет запись в таблицу.
 
 Параметры:
-- `table_name`: имя таблицы
-- `record`: словарь с данными записи
+- `table_name`: Имя таблицы
+- `record`: Словарь с данными
 
 Пример:
 ```python
-db.insert('users', {
-    'id': 1,
-    'name': 'John',
-    'email': 'john@example.com',
-    'age': 30
+db.insert("users", {
+    "name": "Иван",
+    "age": 25
 })
 ```
 
-#### find
+##### find
 ```python
 def find(self, table_name: str, conditions: List[QueryCondition] = None,
-         order_by: str = None, reverse: bool = False,
-         limit: int = None) -> List[Dict[str, Any]]
+         projection: Set[str] = None, order_by: str = None,
+         reverse: bool = False, limit: int = None) -> List[Dict[str, Any]]
 ```
-Поиск записей по условиям.
+Поиск записей.
 
 Параметры:
-- `table_name`: имя таблицы
-- `conditions`: список условий поиска
-- `order_by`: поле для сортировки
-- `reverse`: обратная сортировка
-- `limit`: максимальное количество записей
+- `table_name`: Имя таблицы
+- `conditions`: Условия поиска
+- `projection`: Набор возвращаемых полей
+- `order_by`: Поле для сортировки
+- `reverse`: Обратная сортировка
+- `limit`: Ограничение количества результатов
 
 Пример:
 ```python
 conditions = [
-    QueryCondition('age', '>=', 18),
-    QueryCondition('name', 'startswith', 'J')
+    QueryCondition("age", ">", 18),
+    QueryCondition("name", "startswith", "А")
 ]
-users = db.find('users', conditions, order_by='name', limit=10)
+results = db.find("users", conditions, projection={"name", "age"})
 ```
 
-#### find_one
-```python
-def find_one(self, table_name: str, conditions: List[QueryCondition]) -> Optional[Dict[str, Any]]
-```
-Находит первую запись, соответствующую условиям.
-
-#### exists
-```python
-def exists(self, table_name: str, conditions: List[QueryCondition]) -> bool
-```
-Проверяет существование записей.
-
-#### count
-```python
-def count(self, table_name: str, conditions: List[QueryCondition] = None) -> int
-```
-Подсчитывает количество записей.
-
-#### update
+##### update
 ```python
 def update(self, table_name: str, conditions: List[QueryCondition],
            updates: Dict[str, Any]) -> int
 ```
-Обновляет записи по условиям.
+Обновляет записи.
 
 Параметры:
-- `table_name`: имя таблицы
-- `conditions`: список условий для поиска записей
-- `updates`: словарь с обновляемыми полями
+- `table_name`: Имя таблицы
+- `conditions`: Условия выбора записей
+- `updates`: Обновляемые поля
+
+Возвращает количество обновленных записей.
 
 Пример:
 ```python
-conditions = [QueryCondition('id', '=', 1)]
-updates = {'age': 31}
-updated_count = db.update('users', conditions, updates)
+conditions = [QueryCondition("age", "<", 18)]
+updated = db.update("users", conditions, {"status": "minor"})
 ```
 
-#### delete
+##### delete
 ```python
 def delete(self, table_name: str, conditions: List[QueryCondition]) -> int
 ```
-Удаляет записи по условиям.
+Удаляет записи.
 
-### Импорт и экспорт
+Параметры:
+- `table_name`: Имя таблицы
+- `conditions`: Условия удаления
 
-#### export_json
+Возвращает количество удаленных записей.
+
+Пример:
 ```python
-def export_json(self, filename: str) -> None
-```
-Экспортирует всю базу данных в JSON файл.
-
-#### import_json
-```python
-def import_json(self, filename: str) -> None
-```
-Импортирует данные из JSON файла.
-
-## Работа с индексами
-
-Индексы автоматически создаются для полей с флагом `indexed=True`:
-```python
-db.create_table('posts', {
-    'id': {'types': ['int'], 'unique': True},
-    'title': {'types': ['str'], 'indexed': True},
-    'views': {'types': ['int'], 'indexed': True}
-})
+conditions = [QueryCondition("status", "=", "inactive")]
+deleted = db.delete("users", conditions)
 ```
 
-Индексы ускоряют поиск по условиям равенства:
+### Класс QueryCondition
+
+#### Конструктор
 ```python
-# Быстрый поиск с использованием индекса
-posts = db.find('posts', [QueryCondition('title', '=', 'Hello')])
+def __init__(self, field: str, operator: str, value: Any, use_index: bool = True)
 ```
 
-## Многопоточность
+Параметры:
+- `field`: Имя поля
+- `operator`: Оператор сравнения
+- `value`: Значение
+- `use_index`: Использовать ли индекс
 
-NekoDB обеспечивает потокобезопасность через:
-1. Блокировки таблиц для операций записи
-2. Блокировку кэша
-3. Атомарные операции обновления метаданных
-
-Пример безопасного использования в многопоточной среде:
-```python
-def worker(db, user_id):
-    conditions = [QueryCondition('id', '=', user_id)]
-    with db._table_lock('users'):
-        user = db.find_one('users', conditions)
-        if user:
-            db.update('users', conditions, {'last_login': datetime.now().isoformat()})
-```
+Поддерживаемые операторы:
+- `=`: Равенство
+- `>`: Больше
+- `<`: Меньше
+- `>=`: Больше или равно
+- `<=`: Меньше или равно
+- `!=`: Не равно
+- `in`: Входит в список
+- `not in`: Не входит в список
+- `contains`: Содержит подстроку
+- `startswith`: Начинается с
+- `endswith`: Заканчивается на
+- `regex`: Соответствует регулярному выражению
 
 ## Примеры использования
 
-### Создание связанных таблиц
+### Создание базы данных
 ```python
-# Таблица категорий
-db.create_table('categories', {
-    'id': {'types': ['int'], 'unique': True},
-    'name': {'types': ['str'], 'unique': True}
+from nekodb import DB,QueryCondition
+db = DB("data/mydb")
+```
+
+### Создание таблицы с внешним ключом
+```python
+# Создаем таблицу departments
+db.create_table("departments", {
+    "id": {
+        "types": ["int"],
+        "indexed": True,
+        "unique": True,
+        "nullable": False,
+        "autoincrement": True
+    },
+    "name": {
+        "types": ["str"],
+        "unique": True
+    }
 })
 
-# Таблица товаров со ссылкой на категорию
-db.create_table('products', {
-    'id': {'types': ['int'], 'unique': True},
-    'name': {'types': ['str']},
-    'category_id': {
-        'types': ['int'],
-        'reference': {'table': 'categories', 'field': 'id'}
+# Создаем таблицу employees с внешним ключом
+db.create_table("employees", {
+    "id": {
+        "types": ["int"],
+        "indexed": True,
+        "unique": True,
+        "nullable": False,
+        "autoincrement": True
     },
-    'price': {'types': ['float']},
-    'created_at': {'types': ['time']}
+    "name": {
+        "types": ["str"],
+        "indexed": True
+    },
+    "department_id": {
+        "types": ["int"],
+        "reference": {
+            "table": "departments",
+            "field": "id"
+        }
+    }
 })
 ```
 
-### Сложный поиск с несколькими условиями
+### Использование шардирования
 ```python
+# Создаем таблицу с ключом шардирования
+db.create_table("logs", {
+    "timestamp": {
+        "types": ["datetime"],
+        "shard_key": True  # Шардирование по времени
+    },
+    "level": {
+        "types": ["str"],
+        "indexed": True
+    },
+    "message": {
+        "types": ["str"]
+    }
+})
+```
+
+### Сложный поиск
+```python
+# Поиск с несколькими условиями, сортировкой и лимитом
 conditions = [
-    QueryCondition('price', '>=', 100),
-    QueryCondition('price', '<=', 1000),
-    QueryCondition('created_at', '>=', '2024-01-01 00:00:00'),
-    QueryCondition('category_id', 'in', [1, 2, 3])
+    QueryCondition("age", ">=", 18),
+    QueryCondition("status", "=", "active"),
+    QueryCondition("name", "startswith", "А")
 ]
 
-products = db.find('products', 
-                  conditions=conditions,
-                  order_by='price',
-                  reverse=True,
-                  limit=10)
+results = db.find(
+    table_name="users",
+    conditions=conditions,
+    projection={"name", "age", "email"},
+    order_by="age",
+    reverse=True,
+    limit=10
+)
 ```
 
-### Пакетное обновление
+### Эффективное обновление
 ```python
-# Повышаем цены на 10% для всех товаров в категории
-category_id = 1
-conditions = [QueryCondition('category_id', '=', category_id)]
-products = db.find('products', conditions)
+# Обновление с использованием индекса
+conditions = [QueryCondition("status", "=", "pending")]
+updates = {
+    "status": "processed",
+    "processed_at": datetime.now()
+}
 
-for product in products:
-    update_conditions = [QueryCondition('id', '=', product['id'])]
-    new_price = product['price'] * 1.1
-    db.update('products', update_conditions, {'price': new_price})
+updated_count = db.update("orders", conditions, updates)
 ```
 
-## Советы по оптимизации
-
-1. Используйте индексы для часто запрашиваемых полей
-2. Ограничивайте размер результатов с помощью `limit`
-3. Используйте `find_one` вместо `find`, если нужна одна запись
-4. Правильно выбирайте размер кэша при инициализации
-5. Используйте блокировки таблиц только когда необходимо
-6. Регулярно делайте резервные копии через `export_json`
-
-## Обработка ошибок
-
-NekoDB генерирует следующие исключения:
-- `ValueError`: некорректные значения или операции
-- `RuntimeError`: ошибки времени выполнения
-- `FileNotFoundError`: проблемы с файлами данных
-- `json.JSONDecodeError`: ошибки при разборе JSON
-
-Рекомендуется всегда оборачивать операции с базой в try-except:
+### Закрытие базы данных
 ```python
-try:
-    db.insert('users', {'id': 1, 'name': 'John'})
-except ValueError as e:
-    logger.error(f"Ошибка вставки: {e}")
-except Exception as e:
-    logger.error(f"Неожиданная ошибка: {e}")
+db.close()
 ```
+
+## Заключение
+
+NekoDB предоставляет богатый функционал для хранения и обработки данных с поддержкой современных возможностей, таких как шардирование, индексирование и параллельная обработка. При этом она остается простой в использовании благодаря понятному API.
+
+Основные преимущества:
+1. Автоматическое шардирование данных
+2. Поддержка различных типов индексов
+3. Эффективное сжатие данных
+4. Параллельная обработка операций
+5. Поддержка ссылочной целостности
+6. Гибкая система условий поиска
+7. Автоматическое управление транзакциями

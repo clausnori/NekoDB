@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="NekoDB",
     version="1.0.1",
-    description="Simple NonSql DB ",
+    description="Simple NonSql DB",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     author="ClausNori",
@@ -17,5 +17,6 @@ setup(
     ],
     python_requires='>=3.6',
     install_requires=[
+        "xxhash","lz4","numpy"
     ],
 )

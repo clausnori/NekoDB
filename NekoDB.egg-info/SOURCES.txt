@@ -3,6 +3,7 @@ setup.py
 NekoDB.egg-info/PKG-INFO
 NekoDB.egg-info/SOURCES.txt
 NekoDB.egg-info/dependency_links.txt
+NekoDB.egg-info/requires.txt
 NekoDB.egg-info/top_level.txt
 nekodb/__init__.py
 nekodb/main.py
